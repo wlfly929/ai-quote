@@ -1,13 +1,10 @@
 <template>
   <div class="app-container">
-    <!-- 顶部标题 -->
     <header class="app-header">
       <h1 class="title">✨ AI 灵感名言</h1>
     </header>
 
-    <!-- 内容包装器 -->
     <div class="content-wrapper">
-      <!-- 输入区域 -->
       <section class="input-section">
         <input 
           v-model="topic" 
@@ -25,17 +22,14 @@
         </button>
       </section>
 
-      <!-- 名言展示卡片 -->
-  <!-- 名言展示卡片 - 使用子组件 -->
-<QuoteCard 
-  :quote="quote" 
-  :is-favorited="isCurrentFavorited"
-  @toggle-favorite="toggleFavorite"
-/>
+      <QuoteCard 
+        :quote="quote" 
+        :is-favorited="isCurrentFavorited"
+        @toggle-favorite="toggleFavorite"
+      />
 
-      <!-- 收藏列表 -->
       <section v-if="favorites.length > 0" class="favorites-section">
-        <h2 class="favorites-title"> 我的收藏</h2>
+        <h2 class="favorites-title">📌 我的收藏</h2>
         <div class="favorites-list">
           <div 
             v-for="(item, index) in favorites" 
@@ -54,7 +48,6 @@
         </div>
       </section>
 
-      <!-- 空状态提示 -->
       <section v-else-if="!quote && !loading" class="empty-state">
         <p>💡 输入一个主题，开始探索名言吧</p>
       </section>
@@ -63,57 +56,88 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import QuoteCard from './components/QuoteCard.vue'
 
-// --- 1. 定义数据 ---
+// ========== 数据 ==========
 const topic = ref('')
 const quote = ref('')
 const loading = ref(false)
 const favorites = ref<string[]>([])
 
-// --- 2. 配置AI接口 ---
+// ========== AI 接口 ==========
 const API_KEY = import.meta.env.VITE_API_KEY 
 const API_URL = 'https://api.deepseek.com/v1/chat/completions'
 
-// --- 3. 判断当前名言是否已收藏 ---
+// ========== 判断是否已收藏 ==========
 const isCurrentFavorited = computed(() => {
   return quote.value && favorites.value.includes(quote.value)
 })
 
-// --- 4. 从 localStorage 加载收藏 ---
-const loadFavorites = () => {
-  const saved = localStorage.getItem('ai-quote-favorites')
-  if (saved) {
-    try {
-      favorites.value = JSON.parse(saved)
-    } catch (e) {
-      console.error('加载收藏失败:', e)
-      favorites.value = []
-    }
+// ========== 从后端加载收藏 ==========
+const loadFavorites = async () => {
+  try {
+    const res = await fetch('http://127.0.0.1:8000/favorites')
+    const data = await res.json()
+    favorites.value = data.map((item: any) => item.content)
+  } catch (e) {
+    console.error('加载收藏失败:', e)
+    favorites.value = []
   }
 }
 
-// --- 5. 保存收藏到 localStorage ---
-const saveFavorites = () => {
-  localStorage.setItem('ai-quote-favorites', JSON.stringify(favorites.value))
+// ========== 删除收藏 ==========
+const removeFavorite = async (index: number) => {
+  const content = favorites.value[index]
+  try {
+    const res = await fetch('http://127.0.0.1:8000/favorites')
+    const all = await res.json()
+    const target = all.find((item: any) => item.content === content)
+    if (target) {
+      await fetch(`http://127.0.0.1:8000/favorites/${target.id}`, {
+        method: 'DELETE'
+      })
+    }
+    await loadFavorites()
+  } catch (e) {
+    console.error('删除收藏失败:', e)
+  }
 }
 
-// --- 6. 监听收藏变化，自动保存 ---
-watch(favorites, () => {
-  saveFavorites()
-}, { deep: true })
-
-// --- 7. 组件挂载时加载收藏 ---
-onMounted(() => {
-  loadFavorites()
-})
-
-// --- 8. 删除收藏 ---
-const removeFavorite = (index: number) => {
-  favorites.value.splice(index, 1)
+// ========== 切换收藏状态 ==========
+const toggleFavorite = async () => {
+  if (!quote.value) return
+  
+  const index = favorites.value.indexOf(quote.value)
+  
+  if (index > -1) {
+    // 取消收藏
+    try {
+      const res = await fetch('http://127.0.0.1:8000/favorites')
+      const all = await res.json()
+      const target = all.find((item: any) => item.content === quote.value)
+      if (target) {
+        await fetch(`http://127.0.0.1:8000/favorites/${target.id}`, {
+          method: 'DELETE'
+        })
+      }
+    } catch (e) {
+      console.error('取消收藏失败:', e)
+    }
+  } else {
+    // 添加收藏
+    try {
+      await fetch(`http://127.0.0.1:8000/favorites?content=${encodeURIComponent(quote.value)}`, {
+        method: 'POST'
+      })
+    } catch (e) {
+      console.error('添加收藏失败:', e)
+    }
+  }
+  await loadFavorites()
 }
 
+// ========== 生成名言 ==========
 const getQuote = async () => {
   if (!topic.value.trim()) {
     alert('请输入一个主题')
@@ -136,11 +160,10 @@ const getQuote = async () => {
           { role: 'system', content: '你是一位名言专家,请用中文回复一句关于给定主题的励志名言,并附上作者。回复格式:名言内容 —— 作者名' },
           { role: 'user', content: `关于"${topic.value}"的名言` }
         ],
-        stream: true  // ⬅️ 这里改成 true
+        stream: true
       })
     })
 
-    // 获取响应体的读取器
     const reader = response.body?.getReader()
     const decoder = new TextDecoder('utf-8')
     
@@ -156,16 +179,13 @@ const getQuote = async () => {
     while (!isDone) {
       const { done, value } = await reader.read()
       isDone = done
-      
       if (done) break
       
-      // 将数据块解码为文本
       const chunk = decoder.decode(value, { stream: true })
       buffer += chunk
       
-      // 按行分割，处理 data: 开头的行
       const lines = buffer.split('\n')
-      buffer = lines.pop() || '' // 保留不完整的行
+      buffer = lines.pop() || ''
       
       for (const line of lines) {
         if (line.startsWith('data: ')) {
@@ -176,7 +196,7 @@ const getQuote = async () => {
             const json = JSON.parse(jsonStr)
             const content = json.choices?.[0]?.delta?.content || ''
             if (content) {
-              quote.value += content  // ⬅️ 逐字累加，实现打字机效果
+              quote.value += content
             }
           } catch (e) {
             // 忽略解析错误
@@ -193,17 +213,10 @@ const getQuote = async () => {
   }
 }
 
-// --- 11. 切换收藏状态 ---
-const toggleFavorite = () => {
-  if (!quote.value) return
-  
-  const index = favorites.value.indexOf(quote.value)
-  if (index > -1) {
-    favorites.value.splice(index, 1)
-  } else {
-    favorites.value.unshift(quote.value)
-  }
-}
+// ========== 组件挂载时加载收藏 ==========
+onMounted(() => {
+  loadFavorites()
+})
 </script>
 
 <style scoped>
@@ -223,7 +236,6 @@ const toggleFavorite = () => {
   box-sizing: border-box;
 }
 
-/* 内容包装器 - 用于垂直居中 */
 .content-wrapper {
   width: 100%;
   max-width: 1200px;
@@ -234,7 +246,6 @@ const toggleFavorite = () => {
   padding-bottom: 40px;
 }
 
-/* 顶部标题 */
 .app-header {
   margin-bottom: 40px;
   margin-top: 20px;
@@ -250,7 +261,6 @@ const toggleFavorite = () => {
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-/* 输入区域 */
 .input-section {
   width: 100%;
   display: flex;
@@ -315,7 +325,6 @@ const toggleFavorite = () => {
   cursor: not-allowed;
 }
 
-/* 名言展示卡片 */
 .quote-section {
   width: 100%;
   margin-bottom: 40px;
@@ -384,7 +393,6 @@ const toggleFavorite = () => {
   background: rgba(239, 68, 68, 0.3);
 }
 
-/* 收藏列表区域 */
 .favorites-section {
   width: 100%;
 }
@@ -454,7 +462,6 @@ const toggleFavorite = () => {
   transform: scale(1.1);
 }
 
-/* 空状态提示 */
 .empty-state {
   width: 100%;
   text-align: center;
@@ -463,84 +470,17 @@ const toggleFavorite = () => {
   font-size: 1.1rem;
 }
 </style>
-/* 响应式设计 - 平板 */
-@media (max-width: 1024px) {
-  .app-container {
-    padding: 30px 20px;
-  }
 
-  .title {
-    font-size: 2rem;
-  }
-
-  .content-wrapper {
-    gap: 30px;
-  }
-
-  .quote-card {
-    padding: 30px;
-  }
-
-  .quote-text {
-    font-size: 18px;
-  }
-}
-
-/* 响应式设计 - 移动端 */
-@media (max-width: 768px) {
-  .app-container {
-    padding: 20px 16px;
-  }
-
-  .title {
-    font-size: 1.8rem;
-  }
-
-  .content-wrapper {
-    gap: 24px;
-  }
-
-  .input-section {
-    flex-direction: column;
-  }
-
-  .generate-btn {
-    width: 100%;
-  }
-
-  .quote-card {
-    padding: 24px;
-  }
-
-  .quote-text {
-    font-size: 16px;
-  }
-
-  .favorites-title {
-    font-size: 1.3rem;
-  }
-
-  .favorite-card {
-    padding: 16px 20px;
-  }
-
-  .favorite-text {
-    font-size: 0.9rem;
-  }
-}
-<!-- 在现有的 <style scoped> 之后，添加这个全局样式块 -->
 <style>
-/* 全局样式重置，解决页面左侧空白和滚动条问题 */
 html, body {
   margin: 0;
   padding: 0;
   width: 100%;
   height: 100%;
-  overflow-x: hidden; /* 禁止横向滚动 */
+  overflow-x: hidden;
   box-sizing: border-box;
 }
 
-/* 确保 #app 根元素也占满全屏 */
 #app {
   width: 100%;
   height: 100%;
